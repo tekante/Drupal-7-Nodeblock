@@ -7,6 +7,18 @@
  */
 
 /**
+ * hook_theme
+ */
+function nodeblock_theme($existing, $type, $theme, $path) {
+  return array(
+    'node__nodeblock__default' => array(
+      'render element' => 'elements',
+      'template' => 'node-nodeblock-default',
+    ),
+  );
+}
+
+/**
  * Utility function to tell whether a type is enabled as a node block
  */
 function nodeblock_type_enabled($type) {
@@ -223,16 +235,3 @@ function nodeblock_preprocess_node(&$variables) {
   }
 }
 
-/**
- * Implementation of hook_theme_registry_alter().
- *
- * Add nodeblock path to the 'theme paths' for the 'node' hook.  This allows us
- * to use node-nodeblock-default.tpl.php from the module directory. Note that 
- * the path is "unshifted" onto the theme paths array. This puts the module path
- * before the modules/node path, but since neither of these modules implements
- * the same templates, there is not problem.
- */
-function nodeblock_theme_registry_alter(&$registry) {
-  // TODO: determine how to make the module directory get searched for the default implementation template
-  //array_unshift($registry['node']['theme paths'], drupal_get_path('module', 'nodeblock'));
-}
