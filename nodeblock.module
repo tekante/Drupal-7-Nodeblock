@@ -21,10 +21,7 @@ function nodeblock_type_enabled($type) {
  */
 function nodeblock_form_alter(&$form, $form_state, $form_id) {
   // content type settings form
-  if (FALSE && $form_id == 'node_type_form') {
-    drupal_set_message('<pre>' . print_r(array_keys($form), TRUE) . '</pre>');
-  }
-  if ($form_id == 'node_type_form' && isset($form['type'])) {
+  if ($form_id == 'node_type_form') {
     $form['workflow']['nodeblock'] = array(
       '#type' => 'radios',
       '#title' => t('Available as block'),
@@ -54,43 +51,58 @@ function nodeblock_form_alter(&$form, $form_state, $form_id) {
 }
 
 /**
- * Implementation of hook_nodeapi().
+ * hook_node_delete
  */
-/*
-function nodeblock_nodeapi(&$node, $op, $teaser, $page) {
-  // do nothing if not enabled
+function nodeblock_node_delete() {
   if (!nodeblock_type_enabled($node)) {
     return;
   }
 
-  switch ($op) {
-    case 'load':
-      $tnid = $node->tnid ? $node->tnid : $node->nid;
-      return array('nodeblock_translation_fallback' => variable_get('nodeblock_translation_fallback_'. $tnid, 1));
-
-    case 'insert':
-    case 'update':
-      drupal_set_message(t('The block you just created is now available on the <a href="!url">block configuration page</a>.', array('!url' => url('admin/build/block'))));
-
-      // set the translation fallback variable if set.
-      if (isset($node->nodeblock['translation_fallback'])) {
-        $tnid = $node->tnid ? $node->tnid : $node->nid;
-        variable_set('nodeblock_translation_fallback_'. $tnid, $node->nodeblock['translation_fallback']);
-      }
-      _block_rehash();
-      break;
-
-    case 'delete':
-      _block_rehash();
-      break;
+  if (isset($node->nodeblock['translation_fallback'])) {
+    $tnid = $node->tnid ? $node->tnid : $node->nid;
+    variable_del('nodeblock_translation_fallback_'. $tnid);
   }
+  _block_rehash();
 }
-*/
+/**
+ * hook_node_update
+ */
+function nodeblock_node_update($node) {
+  _nodeblock_insert_update($node);
+}
 
 /**
- * Implementation of hook_block_info()
+ * hook_node_insert
+ */
+function nodeblock_node_insert($node) {
+  _nodeblock_insert_update($node);
+}
+
+/**
+ * consolidation of node insert/update code since behavior should be the same
+ */
+function _nodeblock_insert_update($node) {
+  if (!nodeblock_type_enabled($node)) {
+    return;
+  }
+
+  if ($node->status) {
+    drupal_set_message(t('The block you just created is now available on the <a href="!url">block configuration page</a>.', array('!url' => url('admin/structure/block'))));
+  }
+
+  // set the translation fallback variable if set.
+  if (isset($node->nodeblock['translation_fallback'])) {
+    $tnid = $node->tnid ? $node->tnid : $node->nid;
+    variable_set('nodeblock_translation_fallback_'. $tnid, $node->nodeblock['translation_fallback']);
+  }
+  _block_rehash();
+}
+
+/**
+ * hook_block_info
  */
 function nodeblock_block_info() {
+  $blocks = array();
   $types = node_type_get_types();
   foreach ($types as $type) {
     if (nodeblock_type_enabled($type)) {
@@ -140,70 +152,28 @@ function nodeblock_block_view($delta = '') {
 }
 
 /**
- * Implementation of hook_block().
+ * hook_block_configure
  */
-function nodeblock_block($op = 'list', $delta = 0, $edit = array()) {
-  $types = node_get_types();
-  if ($op == 'list') {
-    foreach ($types as $type) {
-      if (nodeblock_type_enabled($type)) {
-        // Fetch all nodes of this type, excluding translations.
-        $result = db_query("SELECT nid, title FROM {node} WHERE type = '%s' AND status = 1 AND (nid = tnid OR tnid = 0)", $type->type);
-        while ($node = db_fetch_object($result)) {
-          $blocks[$node->nid] = array('info' => $node->title .' (nodeblock)');
-        }
-      }
-    }
-    return $blocks;
-  }
-  elseif ($op == 'configure') {
-    $defaults = variable_get('nodeblock_block_' . $delta, array('teaser' => 0, 'links' => 1));
-    $form['teaser'] = array(
-      '#title' => t('Show only node teaser'),
-      '#type' => 'checkbox',
-      '#default_value' => $defaults['teaser'],
-    );
-    $form['links'] = array(
-      '#type' => 'checkbox',
-      '#default_value' => $defaults['links'],
-      '#title' => t('Include node links for "add comment", "read more" etc.'),
-    );
-    return $form;
-  }
-  else if ($op == 'save') {
-    variable_set('nodeblock_block_' . $delta, array('teaser' => $edit['teaser'], 'links' => $edit['links']));
-  }
-  elseif ($op == 'view') {
-    $node = node_load($delta);
-    if (!node_access('view', $node)) {
-      return;
-    }
-    $nodeblock_display = variable_get('nodeblock_block_' . $delta, array('teaser' => 0, 'links' => 1));
+function nodeblock_block_configure($delta = '') {
+  $defaults = variable_get('nodeblock_block_' . $delta, array('teaser' => 0, 'links' => 1));
+  $form['teaser'] = array(
+    '#title' => t('Show only node teaser'),
+    '#type' => 'checkbox',
+    '#default_value' => $defaults['teaser'],
+  );
+  $form['links'] = array(
+    '#type' => 'checkbox',
+    '#default_value' => $defaults['links'],
+    '#title' => t('Include node links for "add comment", "read more" etc.'),
+  );
+  return $form;
+}
 
-    // if the node type is translatable, try to load the node with the appropriate
-    // language from the translation set.
-    if (module_exists('translation') && translation_supported_type($node->type)) {
-      global $language;
-      $translations = translation_node_get_translations($node->tnid);
-      if ($translations[$language->language]) {
-        $node = node_load($translations[$language->language]->nid);
-      }
-      elseif (!$node->nodeblock_translation_fallback) {
-        // if no translation was found, and not using the fallback option
-        // return nothing, so the block doesn't display.
-        return;
-      }
-      // otherwise we just use the main node
-    }
-
-    // Set a flag so that themes have more context.
-    $node->nodeblock = TRUE;
-    
-    $block['subject'] = check_plain($node->title);
-    $block['content'] = node_view($node, $nodeblock_display['teaser'], TRUE, $nodeblock_display['links']);
-
-    return $block;
-  }
+/**
+ * hook_block_save
+ */
+function nodeblock_block_save($delta = '', $edit = array()) {
+  variable_set('nodeblock_block_' . $delta, array('teaser' => $edit['teaser'], 'links' => $edit['links']));
 }
 
 /**
@@ -230,7 +200,7 @@ function nodeblock_link($type, $node = NULL, $teaser = FALSE) {
     if (user_access('administer blocks')) {
       $links['nodeblock_configure'] = array(
         'title' => t('Configure'),
-        'href' => 'admin/build/block/configure/nodeblock/'. $node->nid,
+        'href' => 'admin/structure/block/configure/nodeblock/'. $node->nid,
         'query' => drupal_get_destination(),
       );
     }
